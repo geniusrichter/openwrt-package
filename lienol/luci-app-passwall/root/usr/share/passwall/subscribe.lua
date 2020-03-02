@@ -9,8 +9,6 @@ require 'luci.util'
 require 'luci.jsonc'
 require 'luci.sys'
 
-local params = arg[1]
-
 -- these global functions are accessed all the time by the event handler
 -- so caching them is worth the effort
 local luci = luci
@@ -23,30 +21,44 @@ local nodeResult = setmetatable({}, { __index = cache })  -- update result
 local name = 'passwall'
 local uciType = 'nodes'
 local ucic = luci.model.uci.cursor()
-local api = require "luci.model.cbi.passwall.api.api"
+local arg2 = arg[2]
 
 local log = function(...)
-	print(os.date("%Y-%m-%d %H:%M:%S: ") .. table.concat({ ... }, " "))
+	if arg2 then
+		local result = os.date("%Y-%m-%d %H:%M:%S: ") .. table.concat({ ... }, " ")
+		if arg2 == "log" then
+			local f,err = io.open("/var/log/passwall.log","a")
+			if f and err == nil then
+				f:write(result.."\n")
+				f:close()
+			end
+		elseif arg2 == "print" then
+			print(result)
+		end
+	end
 end
 
 -- 分割字符串
 local function split(full, sep)
-	full = full:gsub("%z", "")  -- 这里不是很清楚 有时候结尾带个\0
-	local off, result = 1, {}
-	while true do
-		local nEnd = full:find(sep, off)
-		if not nEnd then
-			local res = ssub(full, off, slen(full))
-			if #res > 0 then -- 过滤掉 \0
-				tinsert(result, res)
+	if full then
+		full = full:gsub("%z", "")  -- 这里不是很清楚 有时候结尾带个\0
+		local off, result = 1, {}
+		while true do
+			local nStart, nEnd = full:find(sep, off)
+			if not nEnd then
+				local res = ssub(full, off, slen(full))
+				if #res > 0 then -- 过滤掉 \0
+					tinsert(result, res)
+				end
+				break
+			else
+				tinsert(result, ssub(full, off, nStart - 1))
+				off = nEnd + 1
 			end
-			break
-		else
-			tinsert(result, ssub(full, off, nEnd - 1))
-			off = nEnd + slen(sep)
 		end
+		return result
 	end
-	return result
+	return {}
 end
 -- urlencode
 local function get_urlencode(c)
@@ -103,7 +115,7 @@ local function processData(szType, content, add_mode)
 		is_sub = (add_mode and add_mode == "导入") and 0 or 1
 	}
 	if szType == 'ssr' then
-		local dat = split(content, "/\\?")
+		local dat = split(content, "/%?")
 		local hostInfo = split(dat[1], ':')
 		result.type = "SSR"
 		result.address = hostInfo[1]
@@ -117,7 +129,7 @@ local function processData(szType, content, add_mode)
 			local t = split(v, '=')
 			params[t[1]] = t[2]
 		end
-		result.obfs_param = base64Decode(params.bfsparam)
+		result.obfs_param = base64Decode(params.obfsparam)
 		result.protocol_param = base64Decode(params.protoparam)
 		local group = base64Decode(params.group)
 		if group then
@@ -129,12 +141,13 @@ local function processData(szType, content, add_mode)
 		result.type = 'V2ray'
 		result.address = info.add
 		result.port = info.port
+		result.v2ray_protocol = 'vmess'
 		result.v2ray_transport = info.net
 		result.v2ray_VMess_alterId = info.aid
 		result.v2ray_VMess_id = info.id
 		result.remarks = info.ps
-		result.v2ray_mux = 1
-		result.v2ray_mux_concurrency = 8
+		-- result.v2ray_mux = 1
+		-- result.v2ray_mux_concurrency = 8
 		if info.net == 'ws' then
 			result.v2ray_ws_host = info.host
 			result.v2ray_ws_path = info.path
@@ -168,6 +181,7 @@ local function processData(szType, content, add_mode)
 		if info.tls == "tls" or info.tls == "1" then
 			result.v2ray_stream_security = "tls"
 			result.tls_serverName = info.host
+			result.tls_allowInsecure = 1
 		else
 			result.v2ray_stream_security = "none"
 		end
@@ -187,22 +201,22 @@ local function processData(szType, content, add_mode)
 		result.remarks = UrlDecode(alias)
 		result.type = "SS"
 		result.address = host[1]
-		if host[2]:find("/\\?") then
-			local query = split(host[2], "/\\?")
+		if host[2]:find("/%?") then
+			local query = split(host[2], "/%?")
 			result.port = query[1]
 			local params = {}
 			for _, v in pairs(split(query[2], '&')) do
 				local t = split(v, '=')
 				params[t[1]] = t[2]
 			end
-			if params.lugin then
-				local plugin_info = UrlDecode(params.lugin)
+			if params.plugin then
+				local plugin_info = UrlDecode(params.plugin)
 				local idx_pn = plugin_info:find(";")
 				if idx_pn then
-						result.ss_plugin = plugin_info:sub(1, idx_pn - 1)
-						result.ss_plugin_opts = plugin_info:sub(idx_pn + 1, #plugin_info)
+					result.ss_plugin = plugin_info:sub(1, idx_pn - 1)
+					result.ss_plugin_opts = plugin_info:sub(idx_pn + 1, #plugin_info)
 				else
-						result.ss_plugin = plugin_info
+					result.ss_plugin = plugin_info
 				end
 			end
 		else
@@ -210,6 +224,45 @@ local function processData(szType, content, add_mode)
 		end
 		result.ss_encrypt_method = method
 		result.password = password
+	elseif szType == "trojan" then
+		local alias = ""
+		if content:find("#") then
+			local idx_sp = content:find("#")
+			alias = content:sub(idx_sp + 1, -1)
+			content = content:sub(0, idx_sp - 1)
+		end
+		local Info = split(content, "@")
+		if Info then
+			local address, port, peer
+			local password = Info[1]
+			local allowInsecure = 1
+			local params = {}
+			local hostInfo = split(Info[2], ":")
+			if hostInfo then
+				address = hostInfo[1]
+				hostInfo = split(hostInfo[2], "?")
+				if hostInfo then
+					port = hostInfo[1]
+					for _, v in pairs(split(hostInfo[2], '&')) do
+						local t = split(v, '=')
+						params[t[1]] = t[2]
+					end
+					if params.allowInsecure then
+						allowInsecure = params.allowInsecure
+					end
+					if params.peer then
+						peer = params.peer
+					end
+				end
+			end
+			result.type = "Trojan"
+			result.address = address
+			result.port = port
+			result.password = password
+			result.tls_allowInsecure = allowInsecure
+			result.tls_serverName = peer
+			result.remarks = UrlDecode(alias)
+		end
 	elseif szType == "ssd" then
 		result.type = "SS"
 		result.address = content.server
@@ -220,6 +273,9 @@ local function processData(szType, content, add_mode)
 		result.ss_plugin_opts = content.plugin_options
 		result.group = content.airport
 		result.remarks = content.remarks
+	else
+		log('暂时不支持' .. szType .. "类型的节点订阅，跳过此节点。")
+		return nil
 	end
 	if not result.remarks then
 		result.remarks = result.address .. ':' .. result.port
@@ -233,7 +289,7 @@ local function processData(szType, content, add_mode)
 end
 -- wget
 local function wget(url)
-	local stdout = luci.sys.exec('/usr/bin/wget --user-agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/77.0.3865.90 Safari/537.36" --no-check-certificate -t 3 -T 10 -O- "' .. url .. '"')
+	local stdout = luci.sys.exec('/usr/bin/wget --user-agent="Mozilla/5.0 (X11; Linux x86_64) AppleWebKit/537.36 (KHTML, like Gecko) Chrome/80.0.3987.122 Safari/537.36" --no-check-certificate -t 3 -T 10 -O- "' .. url .. '"')
 	return trim(stdout)
 end
 
@@ -245,7 +301,7 @@ local function truncate_nodes()
 	for i = 1, tcp_node_num, 1 do
 		local node = ucic:get_first(name, "global", "tcp_node"..i, nil)
 		if node and node ~= "nil" then
-			local is_sub_node = api.uci_get_type_id(node, "is_sub", "0")
+			local is_sub_node = ucic:get(name, node, "is_sub", "0")
 			if is_sub_node == "1" then
 				is_stop = 1
 				ucic:set(name, ucic:get_first(name, 'global'), "tcp_node"..i, "nil")
@@ -256,7 +312,7 @@ local function truncate_nodes()
 	for i = 1, udp_node_num, 1 do
 		local node = ucic:get_first(name, "global", "udp_node"..i, nil)
 		if node and node ~= "nil" then
-			local is_sub_node = api.uci_get_type_id(node, "is_sub", "0")
+			local is_sub_node = ucic:get(name, node, "is_sub", "0")
 			if is_sub_node == "1" then
 				is_stop = 1
 				ucic:set(name, ucic:get_first(name, 'global'), "udp_node"..i, "nil")
@@ -267,7 +323,7 @@ local function truncate_nodes()
 	for i = 1, socks5_node_num, 1 do
 		local node = ucic:get_first(name, "global", "socks5_node"..i, nil)
 		if node and node ~= "nil" then
-			local is_sub_node = api.uci_get_type_id(node, "is_sub", "0")
+			local is_sub_node = ucic:get(name, node, "is_sub", "0")
 			if is_sub_node == "1" then
 				is_stop = 1
 				ucic:set(name, ucic:get_first(name, 'global'), "socks5_node"..i, "nil")
@@ -289,7 +345,10 @@ local function truncate_nodes()
 end
 
 local function update_node(manual)
-	assert(next(nodeResult), "node result is empty")
+	if next(nodeResult) == nil then
+			log("更新失败，没有可用的节点信息")
+			return
+	end
 	local add, del = 0, 0
 	ucic:foreach(name, uciType, function(old)
 		if old.grouphashkey or old.hashkey then -- 没有 hash 的不参与删除
@@ -304,14 +363,8 @@ local function update_node(manual)
 					setmetatable(nodeResult[old.grouphashkey][old.hashkey], { __index =  { _ignore = true } })
 				end
 			elseif manual == 1 and (old.add_mode and old.add_mode == "导入") then
-				if not nodeResult[old.grouphashkey] or not nodeResult[old.grouphashkey][old.hashkey] then
+				if nodeResult[old.grouphashkey] and nodeResult[old.grouphashkey][old.hashkey] then
 					ucic:delete(name, old['.name'])
-					del = del + 1
-				else
-					local dat = nodeResult[old.grouphashkey][old.hashkey]
-					ucic:tset(name, old['.name'], dat)
-					-- 标记一下
-					setmetatable(nodeResult[old.grouphashkey][old.hashkey], { __index =  { _ignore = true } })
 				end
 			end
 		else
@@ -328,6 +381,7 @@ local function update_node(manual)
 
 		end
 	end
+	log('新增节点数量: ' ..add, '删除节点数量: ' .. del)
 	ucic:commit(name)
 	-- 如果节点已经不见了把帮换一个
 	local globalServer = ucic:get_first(name, 'global', 'tcp_node1', '')
@@ -340,10 +394,9 @@ local function update_node(manual)
 		end
 		luci.sys.call("/etc/init.d/" .. name .. " restart > /dev/null 2>&1 &") -- 不加&的话日志会出现的更早
 	end
-	log('新增节点数量: ' ..add, '删除节点数量: ' .. del)
 end
 
-local function parse_link(raw, md5_str, manual)
+local function parse_link(raw, remark, md5_str, manual)
 	if raw and #raw > 0 then
 		local add_mode
 		local nodes, szType
@@ -354,6 +407,7 @@ local function parse_link(raw, md5_str, manual)
 		-- SSD 似乎是这种格式 ssd:// 开头的
 		if raw:find('ssd://') then
 			szType = 'ssd'
+			add_mode = remark
 			local nEnd = select(2, raw:find('ssd://'))
 			nodes = base64Decode(raw:sub(nEnd + 1, #raw))
 			nodes = jsonParse(nodes)
@@ -376,6 +430,7 @@ local function parse_link(raw, md5_str, manual)
 				add_mode = '导入'
 			else
 				nodes = split(base64Decode(raw):gsub(" ", "\n"), "\n")
+				add_mode = remark
 			end
 		end
 
@@ -388,7 +443,7 @@ local function parse_link(raw, md5_str, manual)
 					local node = trim(v)
 					local dat = split(node, "://")
 					if dat and dat[1] and dat[2] then
-						if dat[1] == 'ss' then
+						if dat[1] == 'ss' or dat[1] == 'trojan' then
 							result = processData(dat[1], dat[2], add_mode)
 						else
 							result = processData(dat[1], base64Decode(dat[2]), add_mode)
@@ -403,7 +458,8 @@ local function parse_link(raw, md5_str, manual)
 						result.remarks:find("剩余流量") or
 						result.remarks:find("QQ群") or
 						result.remarks:find("官网") or
-						not result.address
+						not result.address or
+						result.address:match("[^0-9a-zA-Z%-%.%s]") -- 中文做地址的 也没有人拿中文域名搞，就算中文域也有Puny Code SB 机场
 					then
 						log('丢弃无效节点: ' .. result.type ..' 节点, ' .. result.remarks)
 					else
@@ -416,6 +472,10 @@ local function parse_link(raw, md5_str, manual)
 			end
 		end
 		log('成功解析节点数量: ' ..#nodes)
+	else
+		if not manual then
+			log('获取到的节点内容为空...')
+		end
 	end
 end
 
@@ -427,9 +487,10 @@ local execute = function()
 			if enabled and enabled == "1" then
 				local remark = obj.remark
 				local url = obj.url
+				log('正在订阅: ' .. url)
 				local md5_str = md5(url)
 				local raw = wget(url)
-				parse_link(raw, md5_str)
+				parse_link(raw, remark, md5_str)
 			end
 		end)
 	end
@@ -450,6 +511,8 @@ if arg[1] then
 				log('发生错误, 正在恢复服务')
 			end)
 			log('订阅完毕...')
+		else
+			log('未设置或启用订阅, 请检查设置...')
 		end
 	elseif arg[1] == "add" then
 		local f = assert(io.open("/tmp/links.conf",'r'))
@@ -458,7 +521,7 @@ if arg[1] then
 		local nodes = split(content:gsub(" ", "\n"), "\n")
 		for _, raw in ipairs(nodes) do
 			local md5_str = md5(raw)
-			parse_link(raw, md5_str, 1)
+			parse_link(raw, nil, md5_str, 1)
 		end
 		update_node(1)
 	elseif arg[1] == "truncate" then

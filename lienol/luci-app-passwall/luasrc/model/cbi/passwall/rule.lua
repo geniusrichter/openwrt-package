@@ -1,12 +1,17 @@
 local e = require "nixio.fs"
 local e = require "luci.sys"
--- local t = luci.sys.exec("cat /usr/share/passwall/dnsmasq.d/gfwlist.conf|grep -c ipset")
 
 m = Map("passwall")
 -- [[ Rule Settings ]]--
+--[[
 s = m:section(TypedSection, "global_rules", translate("Rule status"))
 s.anonymous = true
 s:append(Template("passwall/rule/rule_version"))
+o = s:option(Flag, "adblock", translate("Enable adblock"))
+o.rmempty = false
+
+o = s:option(Value, "adblock_url", translate("adblock_url"))
+o.default = "https://easylist-downloads.adblockplus.org/easylistchina+easylist.txt"
 
 ---- Auto Update
 o = s:option(Flag, "auto_update", translate("Enable auto update rules"))
@@ -26,11 +31,13 @@ o = s:option(ListValue, "time_update", translate("Day update rules"))
 for e = 0, 23 do o:value(e, e .. translate("oclock")) end
 o.default = 0
 o:depends("auto_update", 1)
+--]]
 
 -- [[ Subscribe Settings ]]--
 s = m:section(TypedSection, "global_subscribe", translate("Node Subscribe"),
-              translate(
-                  "Please input the subscription url first, save and submit before updating. If you subscribe to update, it is recommended to delete all subscriptions and then re-subscribe."))
+              "<font color='red'>" .. translate(
+                  "Please input the subscription url first, save and submit before updating. If you subscribe to update, it is recommended to delete all subscriptions and then re-subscribe.") ..
+                  "</font>")
 s.anonymous = true
 
 ---- Subscribe via proxy
@@ -63,7 +70,7 @@ o = s:option(Button, "_update", translate("Manual subscription"))
 o.inputstyle = "apply"
 function o.write(e, e)
     luci.sys.call(
-        "lua /usr/share/passwall/subscribe.lua start >> /var/log/passwall.log 2>&1 &")
+        "lua /usr/share/passwall/subscribe.lua start log > /dev/null 2>&1 &")
     luci.http.redirect(luci.dispatcher.build_url("admin", "vpn", "passwall",
                                                  "log"))
 end
@@ -73,7 +80,7 @@ o = s:option(Button, "_stop", translate("Delete All Subscribe Node"))
 o.inputstyle = "remove"
 function o.write(e, e)
     luci.sys.call(
-        "lua /usr/share/passwall/subscribe.lua truncate >> /var/log/passwall.log 2>&1 &")
+        "lua /usr/share/passwall/subscribe.lua truncate log > /dev/null 2>&1 &")
     luci.http.redirect(luci.dispatcher.build_url("admin", "vpn", "passwall",
                                                  "log"))
 end
@@ -97,7 +104,9 @@ o.rmempty = false
 
 -- [[ App Settings ]]--
 s = m:section(TypedSection, "global_app", translate("App Update"),
-              translate("Please confirm that your firmware supports FPU."))
+              "<font color='red'>" ..
+                  translate("Please confirm that your firmware supports FPU.") ..
+                  "</font>")
 s.anonymous = true
 s:append(Template("passwall/rule/v2ray_version"))
 s:append(Template("passwall/rule/kcptun_version"))

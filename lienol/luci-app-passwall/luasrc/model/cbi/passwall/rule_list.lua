@@ -2,82 +2,68 @@ local fs = require "nixio.fs"
 
 m = Map("passwall")
 -- [[ Rule List Settings ]]--
-s = m:section(TypedSection, "global", translate("Set Blacklist And Whitelist"))
+s = m:section(TypedSection, "global_rules")
 s.anonymous = true
 
 ---- Whitelist Hosts
-local t = "/etc/config/passwall_rule/whitelist_host"
-o = s:option(TextValue, "whitelist_host", translate("Whitelist Hosts"))
-o.description = translate(
-                    "Join the white list of domain names will not go agent.")
-o.rows = 5
+s:tab("w_hosts", translate("Whitelist Hosts"), "<font color='red'>" ..
+          translate("Join the white list of domain names will not go agent.") ..
+          "</font>")
+local w_host_file = "/usr/share/passwall/rules/whitelist_host"
+o = s:taboption("w_hosts", TextValue, "whitelist_host")
+o.rows = 20
 o.wrap = "off"
-o.cfgvalue = function(a, a) return fs.readfile(t) or "" end
-o.write = function(o, o, a)
-    fs.writefile("/tmp/whitelist_host", a:gsub("\r\n", "\n"))
-    if (luci.sys.call(
-        "cmp -s /tmp/whitelist_host /etc/config/passwall_rule/whitelist_host") ==
-        1) then
-        fs.writefile(t, a:gsub("\r\n", "\n"))
-        luci.sys.call("rm -f /tmp/dnsmasq.d/whitelist_host.conf >/dev/null")
-    end
-    fs.remove("/tmp/whitelist_host")
+o.cfgvalue = function(self, section) return fs.readfile(w_host_file) or "" end
+o.write = function(self, section, value)
+    fs.writefile(w_host_file, value:gsub("\r\n", "\n"):gsub("http://", ""):gsub(
+                     "https://", ""))
 end
+o.remove = function(self, section, value) fs.writefile(w_host_file, "") end
 
 ---- Whitelist IP
-local t = "/etc/config/passwall_rule/whitelist_ip"
-o = s:option(TextValue, "whitelist_ip", translate("Whitelist IP"))
-o.description = translate(
-                    "These had been joined ip addresses will not use proxy.Please input the ip address or ip address segment,every line can input only one ip address.For example,112.123.134.145/24 or 112.123.134.145.")
-o.rows = 5
+s:tab("w_ip", translate("Whitelist IP"), "<font color='red'>" .. translate(
+          "These had been joined ip addresses will not use proxy.Please input the ip address or ip address segment,every line can input only one ip address.For example,192.168.0.0/24 or 223.5.5.5.") ..
+          "</font>")
+local w_ip_file = "/usr/share/passwall/rules/whitelist_ip"
+o = s:taboption("w_ip", TextValue, "whitelist_ip")
+o.rows = 20
 o.wrap = "off"
-o.cfgvalue = function(a, a) return fs.readfile(t) or "" end
-o.write = function(o, o, a) fs.writefile(t, a:gsub("\r\n", "\n")) end
+o.cfgvalue = function(self, section) return fs.readfile(w_ip_file) or "" end
+o.write = function(self, section, value)
+    fs.writefile(w_ip_file, value:gsub("\r\n", "\n"):gsub("http://", ""):gsub(
+                     "https://", ""))
+end
+o.remove = function(self, section, value) fs.writefile(w_ip_file, "") end
 
 ---- Blacklist Hosts
-local t = "/etc/config/passwall_rule/blacklist_host"
-o = s:option(TextValue, "blacklist_host", translate("Blacklist Hosts"))
-o.description = translate(
-                    "These had been joined websites will use proxy.Please input the domain names of websites,every line can input only one website domain.For example,google.com.")
-o.rows = 5
+s:tab("b_hosts", translate("Blacklist Hosts"),
+      "<font color='red'>" .. translate(
+          "These had been joined websites will use proxy.Please input the domain names of websites,every line can input only one website domain.For example,google.com.") ..
+          "</font>")
+local b_host_file = "/usr/share/passwall/rules/blacklist_host"
+o = s:taboption("b_hosts", TextValue, "blacklist_host")
+o.rows = 20
 o.wrap = "off"
-o.cfgvalue = function(a, a) return fs.readfile(t) or "" end
-o.write = function(o, o, a)
-    fs.writefile("/tmp/blacklist_host", a:gsub("\r\n", "\n"))
-    if (luci.sys.call(
-        "cmp -s /tmp/blacklist_host /etc/config/passwall_rule/blacklist_host") ==
-        1) then
-        fs.writefile(t, a:gsub("\r\n", "\n"))
-        luci.sys.call("rm -f /tmp/dnsmasq.d/blacklist_host.conf >/dev/null")
-    end
-    fs.remove("/tmp/blacklist_host")
+o.cfgvalue = function(self, section) return fs.readfile(b_host_file) or "" end
+o.write = function(self, section, value)
+    fs.writefile(b_host_file, value:gsub("\r\n", "\n"):gsub("http://", ""):gsub(
+                     "https://", ""))
 end
+o.remove = function(self, section, value) fs.writefile(b_host_file, "") end
 
 ---- Blacklist IP
-local t = "/etc/config/passwall_rule/blacklist_ip"
-o = s:option(TextValue, "blacklist_ip", translate("Blacklist IP"))
-o.description = translate(
-                    "These had been joined ip addresses will use proxy.Please input the ip address or ip address segment,every line can input only one ip address.For example,112.123.134.145/24 or 112.123.134.145.")
-o.rows = 5
+s:tab("b_ip", translate("Blacklist IP"), "<font color='red'>" .. translate(
+          "These had been joined ip addresses will use proxy.Please input the ip address or ip address segment,every line can input only one ip address.For example,35.24.0.0/24 or 8.8.4.4.") ..
+          "</font>")
+local b_ip_file = "/usr/share/passwall/rules/blacklist_ip"
+o = s:taboption("b_ip", TextValue, "blacklist_ip")
+o.rows = 20
 o.wrap = "off"
-o.cfgvalue = function(a, a) return fs.readfile(t) or "" end
-o.write = function(o, o, a) fs.writefile(t, a:gsub("\r\n", "\n")) end
-
----- Router Hosts
-local t = "/etc/config/passwall_rule/router"
-o = s:option(TextValue, "routerlist", translate("Router Hosts"))
-o.description = translate(
-                    "These had been joined websites will use proxy,but only Router model.Please input the domain names of websites,every line can input only one website domain.For example,google.com.")
-o.rows = 5
-o.wrap = "off"
-o.cfgvalue = function(a, a) return fs.readfile(t) or "" end
-o.write = function(o, o, a)
-    fs.writefile("/tmp/router", a:gsub("\r\n", "\n"))
-    if (luci.sys.call("cmp -s /tmp/router /etc/config/passwall_rule/router") == 1) then
-        fs.writefile(t, a:gsub("\r\n", "\n"))
-        luci.sys.call("rm -f /tmp/dnsmasq.d/router.conf >/dev/null")
-    end
-    fs.remove("/tmp/router")
+o.cfgvalue = function(self, section) return fs.readfile(b_ip_file) or "" end
+o.write = function(self, section, value)
+    fs.writefile(b_ip_file, value:gsub("\r\n", "\n"):gsub("http://", ""):gsub(
+                     "https://", ""))
 end
+o.remove = function(self, section, value) fs.writefile(b_ip_file, "") end
 
 return m
